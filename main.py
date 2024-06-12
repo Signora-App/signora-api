@@ -1,4 +1,4 @@
-import os; os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+import os
 import numpy as np
 import tensorflow as tf
 import random
@@ -8,7 +8,6 @@ from flask import Flask, jsonify, request
 from google.cloud import storage
 from dotenv import load_dotenv
 from werkzeug.utils import secure_filename
-import asyncio
 
 load_dotenv()
 
@@ -32,8 +31,7 @@ client = storage.Client.from_service_account_json(json_credentials_path=app.conf
 bucket = storage.Bucket(client, bucket_name)
 
 def allowed_file(filename):
-    return '.' in filename and \
-           filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
 
 classes = [chr(i) for i in range(ord('A'), ord('Z') + 1)]
 
@@ -44,15 +42,15 @@ def index():
     }), HTTPStatus.OK
 
 @app.route('/predict', methods=['POST'])
-async def predict():
+def predict():
     load_model()
     
     if request.method == 'POST':
-        reqImage = request.files['image']
-        if reqImage and allowed_file(reqImage.filename):
-            filename = secure_filename(reqImage.filename)
+        req_image = request.files['image']
+        if req_image and allowed_file(req_image.filename):
+            filename = secure_filename(req_image.filename)
             image_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            reqImage.save(image_path)
+            req_image.save(image_path)
             
             # Preprocess the image
             img = Image.open(image_path).convert('RGB')
@@ -61,9 +59,9 @@ async def predict():
             x = np.expand_dims(x, axis=0)
             
             # Predict
-            classificationResult = await asyncio.to_thread(model_classification.predict, x, batch_size=1)
-            predicted_class = classes[np.argmax(classificationResult)]
-            probability = np.max(classificationResult)
+            classification_result = model_classification.predict(x, batch_size=1)
+            predicted_class = classes[np.argmax(classification_result)]
+            probability = np.max(classification_result)
             
             result = {
                 'class': predicted_class,
@@ -71,9 +69,9 @@ async def predict():
             }
             
             # Upload the image to GCS
-            image_name = secure_filename(reqImage.filename)
+            image_name = secure_filename(req_image.filename)
             blob = bucket.blob(f'images/{random.randint(10000, 99999)}_{image_name}')
-            await asyncio.to_thread(blob.upload_from_filename, image_path)
+            blob.upload_from_filename(image_path)
             os.remove(image_path)
             
             return jsonify({
