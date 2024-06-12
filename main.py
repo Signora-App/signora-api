@@ -8,6 +8,7 @@ from flask import Flask, jsonify, request
 from google.cloud import storage
 from dotenv import load_dotenv
 from werkzeug.utils import secure_filename
+import asyncio
 
 load_dotenv()
 
@@ -18,7 +19,13 @@ app.config['UPLOAD_FOLDER'] = 'static/uploads/'
 app.config['MODEL_CLASSIFICATION'] = './models/modelsignora.h5'
 app.config['GCS_CREDENTIALS'] = './credentials/gcs.json'
 
-model_classification = tf.keras.models.load_model(app.config['MODEL_CLASSIFICATION'], compile=False)
+# Lazy load the model
+model_classification = None
+
+def load_model():
+    global model_classification
+    if model_classification is None:
+        model_classification = tf.keras.models.load_model(app.config['MODEL_CLASSIFICATION'], compile=False)
 
 bucket_name = os.environ.get('BUCKET_NAME', 'signora')
 client = storage.Client.from_service_account_json(json_credentials_path=app.config['GCS_CREDENTIALS'])
@@ -37,7 +44,9 @@ def index():
     }), HTTPStatus.OK
 
 @app.route('/predict', methods=['POST'])
-def predict():
+async def predict():
+    load_model()
+    
     if request.method == 'POST':
         reqImage = request.files['image']
         if reqImage and allowed_file(reqImage.filename):
@@ -45,15 +54,14 @@ def predict():
             image_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
             reqImage.save(image_path)
             
-            # Load and preprocess the image
+            # Preprocess the image
             img = Image.open(image_path).convert('RGB')
-            img = img.resize((64, 64))  # Resize to (64, 64)
-            x = tf.keras.preprocessing.image.img_to_array(img)
+            img = img.resize((64, 64))
+            x = np.array(img) / 255.0
             x = np.expand_dims(x, axis=0)
-            x = x / 255.0
             
             # Predict
-            classificationResult = model_classification.predict(x, batch_size=1)
+            classificationResult = await asyncio.to_thread(model_classification.predict, x, batch_size=1)
             predicted_class = classes[np.argmax(classificationResult)]
             probability = np.max(classificationResult)
             
@@ -65,7 +73,7 @@ def predict():
             # Upload the image to GCS
             image_name = secure_filename(reqImage.filename)
             blob = bucket.blob(f'images/{random.randint(10000, 99999)}_{image_name}')
-            blob.upload_from_filename(image_path)
+            await asyncio.to_thread(blob.upload_from_filename, image_path)
             os.remove(image_path)
             
             return jsonify({
