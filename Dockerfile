@@ -1,20 +1,9 @@
-# Use the official Node.js image.
-FROM node:14
-
-# Create and change to the app directory.
-WORKDIR /usr/src/app
-
-# Copy application dependency manifests to the container image.
-COPY package*.json ./
-
-# Install dependencies.
-RUN npm install
-
-# Copy the local code to the container image.
-COPY . .
-
-# Expose the port the app runs on.
-EXPOSE 3000
-
-# Run the web service on container startup.
-CMD [ "node", "server.js" ]
+FROM python:3.10-slim
+ENV PYTHONBUFFERED True
+ENV APP_HOME /app
+WORKDIR $APP_HOME
+COPY . ./
+RUN pip install --upgrade pip
+RUN pip install -r requirements.txt
+EXPOSE 8080
+CMD ["python", "main.py"]
