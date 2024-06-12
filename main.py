@@ -1,4 +1,4 @@
-import os
+import os; os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 import numpy as np
 import tensorflow as tf
 import random
@@ -18,50 +18,44 @@ app.config['UPLOAD_FOLDER'] = 'static/uploads/'
 app.config['MODEL_CLASSIFICATION'] = './models/modelsignora.h5'
 app.config['GCS_CREDENTIALS'] = './credentials/gcs.json'
 
-# Lazy load the model
-model_classification = None
-
-def load_model():
-    global model_classification
-    if model_classification is None:
-        model_classification = tf.keras.models.load_model(app.config['MODEL_CLASSIFICATION'], compile=False)
+model_classification = tf.keras.models.load_model(app.config['MODEL_CLASSIFICATION'], compile=False)
 
 bucket_name = os.environ.get('BUCKET_NAME', 'signora')
 client = storage.Client.from_service_account_json(json_credentials_path=app.config['GCS_CREDENTIALS'])
 bucket = storage.Bucket(client, bucket_name)
 
 def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
+    return '.' in filename and \
+           filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
 
 classes = [chr(i) for i in range(ord('A'), ord('Z') + 1)]
 
 @app.route('/', methods=['GET'])
 def index():
     return jsonify({
-        'Message': 'Hello World!',
+        'Message': 'Selamat Datang Di Signora API',
     }), HTTPStatus.OK
 
 @app.route('/predict', methods=['POST'])
 def predict():
-    load_model()
-    
     if request.method == 'POST':
-        req_image = request.files['image']
-        if req_image and allowed_file(req_image.filename):
-            filename = secure_filename(req_image.filename)
+        reqImage = request.files['image']
+        if reqImage and allowed_file(reqImage.filename):
+            filename = secure_filename(reqImage.filename)
             image_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            req_image.save(image_path)
+            reqImage.save(image_path)
             
-            # Preprocess the image
+            # Load and preprocess the image
             img = Image.open(image_path).convert('RGB')
-            img = img.resize((64, 64))
-            x = np.array(img) / 255.0
+            img = img.resize((64, 64))  # Resize to (64, 64)
+            x = tf.keras.preprocessing.image.img_to_array(img)
             x = np.expand_dims(x, axis=0)
+            x = x / 255.0
             
             # Predict
-            classification_result = model_classification.predict(x, batch_size=1)
-            predicted_class = classes[np.argmax(classification_result)]
-            probability = np.max(classification_result)
+            classificationResult = model_classification.predict(x, batch_size=1)
+            predicted_class = classes[np.argmax(classificationResult)]
+            probability = np.max(classificationResult)
             
             result = {
                 'class': predicted_class,
@@ -69,7 +63,7 @@ def predict():
             }
             
             # Upload the image to GCS
-            image_name = secure_filename(req_image.filename)
+            image_name = secure_filename(reqImage.filename)
             blob = bucket.blob(f'images/{random.randint(10000, 99999)}_{image_name}')
             blob.upload_from_filename(image_path)
             os.remove(image_path)
