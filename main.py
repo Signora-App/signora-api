@@ -26,8 +26,8 @@ bucket = storage.Bucket(client, bucket_name)
 
 def allowed_file(filename):
     return '.' in filename and \
-           filename.rsplit('.', 1)[1] in app.config['ALLOWED_EXTENSIONS']
-           
+           filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
+
 classes = [chr(i) for i in range(ord('A'), ord('Z') + 1)]
 
 @app.route('/', methods=['GET'])
@@ -42,22 +42,32 @@ def predict():
         reqImage = request.files['image']
         if reqImage and allowed_file(reqImage.filename):
             filename = secure_filename(reqImage.filename)
-            reqImage.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
             image_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            reqImage.save(image_path)
+            
+            # Load and preprocess the image
             img = Image.open(image_path).convert('RGB')
-            img = img.resize((160, 160))
+            img = img.resize((64, 64))  # Resize to (64, 64)
             x = tf.keras.preprocessing.image.img_to_array(img)
             x = np.expand_dims(x, axis=0)
-            x = x / 255
+            x = x / 255.0
+            
+            # Predict
             classificationResult = model_classification.predict(x, batch_size=1)
+            predicted_class = classes[np.argmax(classificationResult)]
+            probability = np.max(classificationResult)
+            
             result = {
-                'class': classes[np.argmax(classificationResult)],
-                'probability': str(np.max(classificationResult))
+                'class': predicted_class,
+                'probability': f"{probability:.2f}"
             }
-            image_name = image_path.split('/')[-1]
-            blob = bucket.blob('images/' + str(random.randint(10000, 99999)) + image_name)
-            blob.upload_from_filename(image_path) 
+            
+            # Upload the image to GCS
+            image_name = secure_filename(reqImage.filename)
+            blob = bucket.blob(f'images/{random.randint(10000, 99999)}_{image_name}')
+            blob.upload_from_filename(image_path)
             os.remove(image_path)
+            
             return jsonify({
                 'status': {
                     'code': HTTPStatus.OK,
